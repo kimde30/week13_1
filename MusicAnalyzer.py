@@ -19,7 +19,7 @@ st.markdown(
     """
     <h1 style='text-align: center; color:#6C63FF;'>🎶 Music Analyzer</h1>
     <p style='text-align: center; color:#555; font-size:17px;'>
-        MP3 파일을 업로드하면 BPM, Key, 스펙트럼, 곡 구조 등을 자동 분석해줍니다!
+        MP3 파일을 업로드하면 BPM, Key, Waveform, Spectrogram, 곡 구조(마디 기반)를 시각화합니다!
     </p>
     """,
     unsafe_allow_html=True
@@ -55,24 +55,35 @@ def detect_key(y, sr):
     return best_major if max(major_corr) >= max(minor_corr) else best_minor
 
 # ------------------------------------------------------------
-# 🎬 곡 구조 분석 함수
+# 🎬 곡 구조 분석 함수 (마디 기반)
 # ------------------------------------------------------------
-def analyze_structure(y, sr, n_sections=4):
-    hop = 1024
+def analyze_structure_measures(y, sr, bpm=None, n_sections=4):
+    """
+    곡을 n_sections 개의 섹션(A/B/C...)으로 나눈 뒤,
+    마디 단위로 반환
+    """
+    # 기본 BPM 없으면 추출
+    if bpm is None:
+        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        bpm = float(tempo) if tempo > 0 else 120
+
+    # 1마디 길이 계산 (4/4 기준)
+    measure_duration = 60 / bpm * 4  # 초 단위
+
+    # MFCC 특징 추출
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
     mfcc = librosa.util.normalize(mfcc)
 
+    # Beat Tracking
     tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
-
     if len(beats) < n_sections:
-        return None
+        return None, measure_duration
 
     beat_features = librosa.util.sync(mfcc, beats, aggregate=np.mean)
     beat_features = beat_features.T
-
     n_clusters = min(n_sections, len(beat_features))
 
-    kmeans = KMeans(n_clusters=n_clusters, n_init=10)
+    kmeans = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
     labels = kmeans.fit_predict(beat_features)
 
     times = librosa.frames_to_time(beats, sr=sr)
@@ -80,18 +91,56 @@ def analyze_structure(y, sr, n_sections=4):
 
     section_labels = ["A", "B", "C", "D", "E"]
     results = []
-
     for i in range(min_len - 1):
-        results.append((section_labels[labels[i]], times[i], times[i + 1]))
+        start_sec = times[i]
+        end_sec = times[i + 1]
+        # 초 → 마디 변환
+        start_measure = int(start_sec / measure_duration) + 1
+        end_measure = int(end_sec / measure_duration) + 1
+        results.append((section_labels[labels[i]], start_measure, end_measure))
 
-    return results
+    return results, measure_duration
 
+# ------------------------------------------------------------
+# 🎨 마디 기반 구조 시각화
+# ------------------------------------------------------------
+def plot_song_structure_measures(sections):
+    fig, ax = plt.subplots(figsize=(14, 2))
+    colors = plt.cm.tab20.colors
+    y = 0.5
+    for i, (name, start, end) in enumerate(sections):
+        ax.add_patch(
+            patches.Rectangle(
+                (start, y - 0.3),
+                end - start,
+                0.6,
+                color=colors[i % len(colors)],
+                alpha=0.9
+            )
+        )
+        ax.text(
+            (start + end) / 2,
+            y,
+            name,
+            ha='center',
+            va='center',
+            color='white',
+            fontsize=10,
+            fontweight='bold'
+        )
+    ax.set_ylim(0, 1)
+    ax.set_xlim(0, max([end for _, _, end in sections]) + 1)
+    ax.set_xlabel("Measures (마디)")
+    ax.set_yticks([])
+    ax.set_title("Song Structure by Measures")
+    plt.tight_layout()
+    st.pyplot(fig)
 
 # ------------------------------------------------------------
 # 🎚 분석 실행
 # ------------------------------------------------------------
 if uploaded_file is not None:
-    st.success("파일 업로드 완료! 분석 시작합니다 🔍")
+    st.success("파일 업로드 완료! 분석 시작 🔍")
 
     y, sr = librosa.load(uploaded_file, sr=None, mono=True)
     duration = librosa.get_duration(y=y, sr=sr)
@@ -134,50 +183,10 @@ if uploaded_file is not None:
     st.pyplot(fig2)
 
     # ------------------------------------------------------------
-    # 🎬 구조 분석
+    # 🎬 구조 분석 (마디 단위)
     # ------------------------------------------------------------
-    st.markdown("## 🎬 Song Structure (A/B/C Parts)")
-
-    sections = analyze_structure(y, sr)
-
+    sections, measure_duration = analyze_structure_measures(y, sr, bpm=bpm)
     if sections is None:
-        st.warning("비트가 충분히 감지되지 않아 구조 분석이 불가능합니다.")
+        st.warning("비트가 충분하지 않아 구조 분석 불가")
     else:
-        for part, start, end in sections:
-            st.write(f"**{part}** : {start:5.1f}초 → {end:5.1f}초")
-
-        # ------------------------------------------------------------
-        # 🎨 구조 시각화 그래프 추가
-        # ------------------------------------------------------------
-        st.markdown("## 🎨 Song Structure Timeline")
-
-        fig3, ax3 = plt.subplots(figsize=(12, 2))
-
-        colors = {
-            "A": "#6C63FF",
-            "B": "#FF6584",
-            "C": "#4CD3C2",
-            "D": "#FFA500",
-            "E": "#00A8FF"
-        }
-
-        for part, start, end in sections:
-            width = end - start
-            ax3.add_patch(
-                patches.Rectangle(
-                    (start, 0),
-                    width,
-                    1,
-                    color=colors.get(part, "gray"),
-                    alpha=0.7
-                )
-            )
-            ax3.text(start + width/2, 0.5, part, ha='center', va='center', fontsize=12, color='white')
-
-        ax3.set_xlim(0, duration)
-        ax3.set_ylim(0, 1)
-        ax3.set_yticks([])
-        ax3.set_xlabel("Time (sec)")
-        ax3.set_title("Song Structure Timeline")
-
-        st.pyplot(fig3)
+        plot_song_structure_measures(sections)
