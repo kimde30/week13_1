@@ -6,24 +6,61 @@ from mutagen.id3 import ID3
 import tempfile
 
 
-def detect_bpm(y, sr):
-    try:
-        bpm, _ = librosa.beat.beat_track(y=y, sr=sr)
-        return float(bpm)
-    except:
-        return None
+# ---------------------- Key Detection (Improved) ------------------------
+
+MAJOR_PROFILE = np.array([
+    6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
+    2.52, 5.19, 2.39, 3.66, 2.29, 2.88
+])
+
+MINOR_PROFILE = np.array([
+    6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
+    2.54, 4.75, 3.98, 2.69, 3.34, 3.17
+])
 
 
-def detect_key(y, sr):
+def detect_key_advanced(y, sr):
     try:
-        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-        chroma_mean = np.mean(chroma, axis=1)
-        keys = ['C', 'C#', 'D', 'D#', 'E', 'F',
+        # 1) Harmonic component only (noise 제거 → key 정확도 ↑)
+        y_harmonic = librosa.effects.harmonic(y)
+
+        # 2) Chroma CQT
+        chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr)
+        chroma_mean = chroma.mean(axis=1)
+
+        # 3) Normalization
+        chroma_norm = chroma_mean / chroma_mean.sum()
+
+        # 4) Correlate with major/minor profiles
+        max_corr = -999
+        best_key = None
+        mode = None
+
+        # Keys
+        KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F',
                 'F#', 'G', 'G#', 'A', 'A#', 'B']
-        return keys[int(np.argmax(chroma_mean))]
-    except:
+
+        for i in range(12):
+            corr_major = np.corrcoef(np.roll(MAJOR_PROFILE, i), chroma_norm)[0, 1]
+            corr_minor = np.corrcoef(np.roll(MINOR_PROFILE, i), chroma_norm)[0, 1]
+
+            if corr_major > max_corr:
+                max_corr = corr_major
+                best_key = KEYS[i]
+                mode = "Major"
+
+            if corr_minor > max_corr:
+                max_corr = corr_minor
+                best_key = KEYS[i]
+                mode = "Minor"
+
+        return f"{best_key} {mode}"
+
+    except Exception:
         return None
 
+
+# ---------------------- Metadata Extraction ----------------------------
 
 def get_metadata_mp3(file_path):
     try:
@@ -45,10 +82,31 @@ def get_metadata_mp3(file_path):
     return title, artist, duration
 
 
-# ------------------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
-st.title("🎵 MP3 음원 자동 분석기")
-st.write("MP3 파일을 업로드하면 제목, 가수, BPM, Key, 전체 마디 수를 분석합니다.")
+st.set_page_config(page_title="🎵 Music Analyzer", layout="centered")
+
+# Custom CSS for prettier UI
+st.markdown("""
+<style>
+    .result-card {
+        background: #1f2937;
+        padding: 20px;
+        border-radius: 15px;
+        color: white;
+        margin-top: 20px;
+    }
+    .title {
+        text-align: center;
+        font-size: 32px;
+        font-weight: bold;
+        color: #10b981;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("<h1 class='title'>🎵 MP3 음악 분석기</h1>", unsafe_allow_html=True)
+st.write("MP3 파일을 업로드하면 **제목, 가수, BPM, Key, 전체 마디 수**를 분석합니다.")
 
 uploaded_file = st.file_uploader("MP3 파일 업로드", type=["mp3"])
 
@@ -57,44 +115,36 @@ if uploaded_file is not None:
         tmp.write(uploaded_file.read())
         tmp_path = tmp.name
 
-    st.success("파일 업로드 완료!")
+    with st.spinner("분석 중입니다... 🎧"):
+        # Metadata
+        title, artist, duration = get_metadata_mp3(tmp_path)
+        # Audio load
+        y, sr = librosa.load(tmp_path, sr=None)
+        # BPM
+        bpm, _ = librosa.beat.beat_track(y=y, sr=sr)
+        # Key - improved
+        key = detect_key_advanced(y, sr)
 
-    # 1. Metadata
-    title, artist, duration = get_metadata_mp3(tmp_path)
-
-    # 2. 오디오 로드
-    try:
-        y, sr = librosa.load(tmp_path)
-    except Exception as e:
-        st.error(f"오디오 로드 실패: {e}")
-        st.stop()
-
-    # 3. BPM
-    bpm = detect_bpm(y, sr)
-
-    # 4. Key
-    key = detect_key(y, sr)
-
-    # 5. 마디 수 계산(오류 방지)
-    if bpm and bpm > 0 and duration and duration > 0:
-        try:
-            measures = duration / (60 / bpm)
-            measures = round(measures)
-        except:
+        # Measures
+        if bpm > 0 and duration:
+            measures = round(duration / (60 / bpm))
+        else:
             measures = None
-    else:
-        measures = None
 
-    # 출력
-    st.subheader("분석 결과")
+    # ------------------- Result UI -------------------
+    st.markdown("<div class='result-card'>", unsafe_allow_html=True)
 
-    st.write(f"**제목:** {title or '알 수 없음'}")
-    st.write(f"**가수:** {artist or '알 수 없음'}")
-    st.write(f"**BPM:** {bpm if bpm else '추출 실패'}")
-    st.write(f"**Key(조성):** {key if key else '추출 실패'}")
-    st.write(f"**전체 길이:** {round(duration,2) if duration else '알 수 없음'}")
+    st.subheader("📌 분석 결과")
+
+    st.write(f"**🎼 제목:** {title or '알 수 없음'}")
+    st.write(f"**🎤 가수:** {artist or '알 수 없음'}")
+    st.write(f"**⏱ BPM:** {round(bpm) if bpm else '추출 실패'}")
+    st.write(f"**🎹 Key (조성):** {key or '추출 실패'}")
+    st.write(f"**⏳ 전체 길이:** {round(duration, 2)} 초" if duration else "**⏳ 전체 길이:** 알 수 없음")
 
     if measures:
-        st.write(f"**전체 마디 수:** {measures} 마디")
+        st.write(f"**📏 전체 마디 수:** {measures} 마디")
     else:
-        st.write("**전체 마디 수:** 계산 불가 (BPM 또는 길이 정보 부족)")
+        st.write("**📏 전체 마디 수:** 계산 불가")
+
+    st.markdown("</div>", unsafe_allow_html=True)
