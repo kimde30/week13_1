@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import librosa.display
 from sklearn.cluster import KMeans
+import matplotlib.patches as patches
 
 # ------------------------------------------------------------
 # 🍀 Streamlit GUI 설정
@@ -54,47 +55,34 @@ def detect_key(y, sr):
     return best_major if max(major_corr) >= max(minor_corr) else best_minor
 
 # ------------------------------------------------------------
-# 🎬 곡 구조 분석 함수 (수정된 안정화 버전)
+# 🎬 곡 구조 분석 함수
 # ------------------------------------------------------------
 def analyze_structure(y, sr, n_sections=4):
     hop = 1024
-
-    # MFCC 특징 추출
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
     mfcc = librosa.util.normalize(mfcc)
 
-    # Beat Tracking
     tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
-    
-    # 🔥 비트가 거의 없으면 구조 분석 불가
+
     if len(beats) < n_sections:
         return None
 
-    # Beat Feature Sync
     beat_features = librosa.util.sync(mfcc, beats, aggregate=np.mean)
-    beat_features = beat_features.T  # shape: (beats, features)
+    beat_features = beat_features.T
 
-    # ✔ Error 방지: beats가 부족하면 강제로 클러스터 개수 조정
     n_clusters = min(n_sections, len(beat_features))
 
-    # KMeans
     kmeans = KMeans(n_clusters=n_clusters, n_init=10)
     labels = kmeans.fit_predict(beat_features)
 
-    # Beat → Time 변환
     times = librosa.frames_to_time(beats, sr=sr)
-
-    # ✔ Error 방지: 안전한 길이 설정 (최소 길이 기준)
     min_len = min(len(times), len(labels))
 
     section_labels = ["A", "B", "C", "D", "E"]
     results = []
 
     for i in range(min_len - 1):
-        start = times[i]
-        end = times[i + 1]
-        part = section_labels[labels[i]]
-        results.append((part, start, end))
+        results.append((section_labels[labels[i]], times[i], times[i + 1]))
 
     return results
 
@@ -108,24 +96,17 @@ if uploaded_file is not None:
     y, sr = librosa.load(uploaded_file, sr=None, mono=True)
     duration = librosa.get_duration(y=y, sr=sr)
 
-    # 🎧 BPM 분석
-    try:
-        tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
-        bpm = float(tempo) if tempo > 0 else None
-    except:
-        bpm = None
+    tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
+    bpm = float(tempo) if tempo > 0 else None
 
     if bpm:
         measures = round(duration / (60 / bpm))
     else:
         measures = "계산 불가"
 
-    # 🎼 Key 분석
     key_result = detect_key(y, sr)
 
-    # 📌 결과 출력
     st.markdown("## 📌 분석 결과")
-
     col1, col2 = st.columns(2)
     with col1:
         st.write(f"**🎵 Key:** {key_result}")
@@ -164,3 +145,39 @@ if uploaded_file is not None:
     else:
         for part, start, end in sections:
             st.write(f"**{part}** : {start:5.1f}초 → {end:5.1f}초")
+
+        # ------------------------------------------------------------
+        # 🎨 구조 시각화 그래프 추가
+        # ------------------------------------------------------------
+        st.markdown("## 🎨 Song Structure Timeline")
+
+        fig3, ax3 = plt.subplots(figsize=(12, 2))
+
+        colors = {
+            "A": "#6C63FF",
+            "B": "#FF6584",
+            "C": "#4CD3C2",
+            "D": "#FFA500",
+            "E": "#00A8FF"
+        }
+
+        for part, start, end in sections:
+            width = end - start
+            ax3.add_patch(
+                patches.Rectangle(
+                    (start, 0),
+                    width,
+                    1,
+                    color=colors.get(part, "gray"),
+                    alpha=0.7
+                )
+            )
+            ax3.text(start + width/2, 0.5, part, ha='center', va='center', fontsize=12, color='white')
+
+        ax3.set_xlim(0, duration)
+        ax3.set_ylim(0, 1)
+        ax3.set_yticks([])
+        ax3.set_xlabel("Time (sec)")
+        ax3.set_title("Song Structure Timeline")
+
+        st.pyplot(fig3)
