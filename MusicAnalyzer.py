@@ -60,6 +60,45 @@ def detect_key(y, sr):
     return best_major if max(major_corr) >= max(minor_corr) else best_minor
 
 # ------------------------------------------------------------
+# 🎬 곡 구조 분석 (A/B/C 섹션 자동 감지)
+# ------------------------------------------------------------
+def analyze_structure(y, sr, n_sections=4):
+    """
+    곡을 n_sections개의 파트(A, B, C, D...)로 자동 분할하는 함수
+    """
+    # 1. MFCC 기반 Feature Matrix 생성
+    hop = 1024
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
+    mfcc = librosa.util.normalize(mfcc)
+
+    # 2. Self-similarity matrix 계산
+    R = librosa.segment.recurrence_matrix(mfcc, mode='affinity', sym=True)
+
+    # 3. MFCC의 Beat-Sync (고정 길이 특징)
+    tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
+    beat_features = librosa.util.sync(mfcc, beats, aggregate=np.mean)
+
+    # 4. 구간 clustering으로 섹션 감지
+    from sklearn.cluster import KMeans
+
+    kmeans = KMeans(n_clusters=n_sections, n_init=10)
+    labels = kmeans.fit_predict(beat_features.T)
+
+    # 비트 -> 시간 변환
+    times = librosa.frames_to_time(beats, sr=sr)
+
+    section_labels = ["A", "B", "C", "D", "E"]
+    result = []
+
+    for i in range(len(labels)):
+        start = times[i]
+        end = times[i + 1] if i + 1 < len(times) else librosa.get_duration(y=y, sr=sr)
+        part_name = section_labels[labels[i]]
+        result.append((part_name, start, end))
+
+    return result
+
+# ------------------------------------------------------------
 # 🎚 분석 실행
 # ------------------------------------------------------------
 if uploaded_file is not None:
@@ -108,6 +147,16 @@ if uploaded_file is not None:
 
     st.markdown("---")
 
+    # ------------------------------------------------------------
+    # 🎬 곡 구조 출력
+    # ------------------------------------------------------------
+    st.markdown("## 🎬 Song Structure (A/B/C Parts)")
+
+    sections = analyze_structure(y, sr)
+
+    for part, start, end in sections:
+        st.write(f"**{part}** : {start:5.1f}초 → {end:5.1f}초")
+    
     # ------------------------------------------------------------
     # 📈 Waveform Plot
     # ------------------------------------------------------------
