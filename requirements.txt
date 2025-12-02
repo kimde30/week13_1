@@ -1,6 +1,6 @@
 streamlit
 librosa
 numpy
-mutagen
+matplotlib
+seaborn
 soundfile
-scipy
