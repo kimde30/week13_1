@@ -56,7 +56,6 @@ def analyze_structure_measures(y, sr, bpm=None, n_sections=5):
 # Plot Song Structure with Measures & simple chord
 # ------------------------------
 def plot_structure_and_chords(sections, measure_duration):
-    # 한 줄에 4마디씩
     measures_per_line = 4
     max_measure = max(end for _,_,end in sections)
     n_lines = int(np.ceil(max_measure / measures_per_line))
@@ -72,8 +71,8 @@ def plot_structure_and_chords(sections, measure_duration):
         ax.set_xlim(start_m, end_m)
         ax.set_ylim(0, 2)
         ax.set_yticks([])
-        ax.set_xlabel("Measures (마디)")
-        ax.set_title(f"Measures {start_m}–{end_m}")
+        ax.set_xlabel("Measures (마디)", fontsize=11)
+        ax.set_title(f"Measures {start_m}–{end_m}", fontsize=12, fontweight='bold', color="#6C63FF")
 
         # 구조 막대
         for i, (part, s, e) in enumerate(sections):
@@ -82,13 +81,18 @@ def plot_structure_and_chords(sections, measure_duration):
             s_clip = max(s, start_m)
             e_clip = min(e, end_m)
             width = e_clip - s_clip + 0.001
-            ax.add_patch(patches.Rectangle((s_clip,1.1), width,0.8,color=colors[i%len(colors)],alpha=0.6))
-            ax.text((s_clip+e_clip)/2,1.5,part,ha='center',va='center',fontsize=9,color='white')
+            ax.add_patch(patches.Rectangle(
+                (s_clip,1.1), width,0.8,
+                color=colors[i%len(colors)],
+                alpha=0.7,
+                edgecolor="black"
+            ))
+            ax.text((s_clip+e_clip)/2,1.5,part,ha='center',va='center',fontsize=10,color='white',fontweight='bold')
 
-        # 간단 코드 진행 (마디별 랜덤)
+        # 코드 진행 (마디별 랜덤)
         for m in range(start_m,end_m+1):
             chord = random.choice(["C","Dm","Em","F","G","Am"])
-            ax.text(m,0.3,chord,ha='center',va='center',fontsize=8,color='black',rotation=90)
+            ax.text(m,0.3,chord,ha='center',va='center',fontsize=9,color='#FF5733',rotation=90,fontweight='bold')
 
     plt.tight_layout()
     st.pyplot(fig)
@@ -96,9 +100,20 @@ def plot_structure_and_chords(sections, measure_duration):
 # ------------------------------
 # Streamlit App
 # ------------------------------
-st.set_page_config(page_title="Music Analyzer Lite", layout="centered")
-st.markdown("<h1 style='text-align:center; color:#6C5AFF;'>🎶 Music Analyzer Lite</h1>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("MP3 파일 업로드", type=["mp3","wav"])
+st.set_page_config(page_title="🎶 Music Analyzer Lite", layout="wide")
+st.markdown(
+    """
+    <style>
+    .stApp { background-color: #F0F2FF; }
+    .stFileUploader > label { font-weight: bold; color: #6C63FF; }
+    </style>
+    """, unsafe_allow_html=True
+)
+
+st.markdown("<h1 style='text-align:center; color:#6C63FF;'>🎶 Music Analyzer Lite</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; color:#555;'>MP3/WAV 파일을 업로드하면 자동으로 BPM, Key, 구조 분석을 수행합니다.</p>", unsafe_allow_html=True)
+
+uploaded_file = st.file_uploader("파일 업로드", type=["mp3","wav"])
 
 if uploaded_file is not None:
     with open("tmp_audio.wav","wb") as f:
@@ -109,8 +124,13 @@ if uploaded_file is not None:
     tempo,_ = librosa.beat.beat_track(y=y,sr=sr)
     bpm = float(tempo) if tempo>0 else None
     key = detect_key(y,sr)
-    st.write("**Detected Key:**",key)
-    st.write("**Estimated BPM:**",round(bpm) if bpm else "Unknown")
+
+    # 결과 박스
+    st.markdown("<div style='background-color:#E0E0FF;padding:10px;border-radius:10px'>", unsafe_allow_html=True)
+    st.markdown(f"**🎵 Detected Key:** {key}")
+    st.markdown(f"**⏱ Estimated BPM:** {round(bpm) if bpm else 'Unknown'}")
+    st.markdown("</div>", unsafe_allow_html=True)
+
     st.audio(audio_path)
 
     # 구조 분석
