@@ -3,5 +3,3 @@ librosa
 numpy
 matplotlib
 scikit-learn
-soundfile
-chord-extractor
