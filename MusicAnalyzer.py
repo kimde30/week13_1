@@ -10,16 +10,16 @@ import matplotlib.patches as patches
 # 🍀 Streamlit GUI 설정
 # ------------------------------------------------------------
 st.set_page_config(
-    page_title="🎶 Music Analyzer",
+    page_title="🎶 Music Analyzer Advanced",
     page_icon="🎧",
     layout="centered"
 )
 
 st.markdown(
     """
-    <h1 style='text-align: center; color:#6C63FF;'>🎶 Music Analyzer</h1>
+    <h1 style='text-align: center; color:#6C63FF;'>🎶 Music Analyzer Advanced</h1>
     <p style='text-align: center; color:#555; font-size:17px;'>
-        MP3 파일을 업로드하면 BPM, Key, Waveform, Spectrogram, 곡 구조(마디 기반)를 시각화합니다!
+        MP3 파일을 업로드하면 BPM, Key, Waveform, Spectrogram, 자동 마디 기반 구조 분석 및 시각화를 제공합니다.
     </p>
     """,
     unsafe_allow_html=True
@@ -55,22 +55,24 @@ def detect_key(y, sr):
     return best_major if max(major_corr) >= max(minor_corr) else best_minor
 
 # ------------------------------------------------------------
-# 🎬 곡 구조 분석 함수 (마디 기반)
+# 🎬 자동 구조 분석 (마디 단위)
 # ------------------------------------------------------------
-def analyze_structure_measures(y, sr, bpm=None, n_sections=4):
+def analyze_structure_measures(y, sr, n_sections=4, bpm=None):
     """
-    곡을 n_sections 개의 섹션(A/B/C...)으로 나눈 뒤,
-    마디 단위로 반환
+    자동 마디 감지 + 구조 분석
+    - y: 오디오 신호
+    - sr: 샘플링 레이트
+    - bpm: 기본 템포 (없으면 자동 추출)
+    - n_sections: 자동 섹션 개수
     """
-    # 기본 BPM 없으면 추출
     if bpm is None:
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
         bpm = float(tempo) if tempo > 0 else 120
 
-    # 1마디 길이 계산 (4/4 기준)
-    measure_duration = 60 / bpm * 4  # 초 단위
+    # 4/4 기준 1마디 길이
+    measure_duration = 60 / bpm * 4
 
-    # MFCC 특징 추출
+    # MFCC 특징
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
     mfcc = librosa.util.normalize(mfcc)
 
@@ -79,22 +81,24 @@ def analyze_structure_measures(y, sr, bpm=None, n_sections=4):
     if len(beats) < n_sections:
         return None, measure_duration
 
-    beat_features = librosa.util.sync(mfcc, beats, aggregate=np.mean)
-    beat_features = beat_features.T
+    # Beat Sync MFCC
+    beat_features = librosa.util.sync(mfcc, beats, aggregate=np.mean).T
     n_clusters = min(n_sections, len(beat_features))
 
+    # KMeans 클러스터링
     kmeans = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
     labels = kmeans.fit_predict(beat_features)
 
+    # Beat → Time → Measure 변환
     times = librosa.frames_to_time(beats, sr=sr)
     min_len = min(len(times), len(labels))
 
     section_labels = ["A", "B", "C", "D", "E"]
     results = []
+
     for i in range(min_len - 1):
         start_sec = times[i]
         end_sec = times[i + 1]
-        # 초 → 마디 변환
         start_measure = int(start_sec / measure_duration) + 1
         end_measure = int(end_sec / measure_duration) + 1
         results.append((section_labels[labels[i]], start_measure, end_measure))
@@ -183,10 +187,16 @@ if uploaded_file is not None:
     st.pyplot(fig2)
 
     # ------------------------------------------------------------
-    # 🎬 구조 분석 (마디 단위)
+    # 🎬 자동 구조 분석 + 마디 기반 시각화
     # ------------------------------------------------------------
-    sections, measure_duration = analyze_structure_measures(y, sr, bpm=bpm)
+    sections, measure_duration = analyze_structure_measures(y, sr, n_sections=5, bpm=bpm)
     if sections is None:
         st.warning("비트가 충분하지 않아 구조 분석 불가")
     else:
         plot_song_structure_measures(sections)
+
+    # ------------------------------------------------------------
+    # 🧩 AiR/코드 분석 연동 구조 (예시)
+    # ------------------------------------------------------------
+    st.markdown("## 🎹 코드 진행 / AiR 분석 (예시)")
+    st.info("추후 AiR 분석 라이브러리 또는 코드 진행 추출 기능 연동 가능")
