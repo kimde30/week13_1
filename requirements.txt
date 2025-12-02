@@ -1,4 +1,6 @@
 streamlit
 librosa
 numpy
+matplotlib
+seaborn
 soundfile
