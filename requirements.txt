@@ -2,5 +2,6 @@ streamlit
 librosa
 numpy
 matplotlib
-seaborn
+scikit-learn
 soundfile
+chord-extractor
